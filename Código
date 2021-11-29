@@ -1,0 +1,116 @@
+!pip install ortools  
+from ortools.linear_solver import pywraplp  # importa pacote para usar o solver
+import pandas as pd                         # importação para uso de arquivos em Excel
+
+#Montando a função de leitura de dados
+
+def leitura(arquivo):
+
+  ARQ = pd.read_excel(arquivo, sheet_name= 'Qtde') #abre o aquivo para leitura na aba quantidade
+  DMU = ARQ.at[0,'Valores']
+  IN = ARQ.at[1,'Valores']
+  OUT = ARQ.at[2,'Valores']
+
+  ARQ = pd.read_excel(arquivo, sheet_name='DMUS') #abre arquivo para leitura das DMUs
+  Nomes = ARQ['Nomes']
+
+  ARQ = pd.read_excel(arquivo, sheet_name='Input')
+  x = [] #Lista com todas as colunas de Input
+  #percorre todas as colunas
+  for i in range(IN): #para cada input
+    nomecoluna = "Input"+str(i+1) #Input1, Input2...
+    xI = [] #lista para cada coluna de inputs
+    for k in range(DMU): #para cada linha sob a coluna Input1 (número de linhas depende do numero de DMUs)
+      xIK = ARQ.at[k, nomecoluna] #indentifica o dado na linha k e coluna nome coluna
+      xI.append(xIK) #coloca um numero de inputs na coluna
+    x.append(xI) #coloca a coluna em x
+
+  ARQ = pd.read_excel(arquivo, sheet_name='Output')
+  y = []
+  for j in range(OUT):
+    nomecoluna = "Output"+str(j+1)
+    yJ = []
+    for k in range(DMU):
+      yJK = ARQ.at[k, nomecoluna]
+      yJ.append(yJK)
+    y.append(yJ)
+
+  print(DMU)
+  print(IN)
+  print(OUT)
+  return DMU, Nomes, IN, OUT, x, y
+
+#    DMU  - guarda a quantidade de DMUs
+#    IN   - guarda a quantidade de inputs
+#    OUT  - guarda a quantidade de outputs
+#    i    - índice para inputs
+#    j    - índice para outputs
+#    k    - índice para DMUs
+#    x    - lista com todos os inputs, uso: inputs[i][k]
+#    y    - lista com todos os outputs, uso: outputs[j][k]
+
+# CCR com orientação a input
+def CCR_MULTIPLICADORES_INPUT(Nomes, dmuO, DMU, IN, OUT, x, y):
+
+    v = [0]*IN   # alocando memória para um vetor com IN elementos  v = [0]
+    u = [0]*OUT  # alocando memória para um vetor com OUT elementos  u = [0,0,0,0,0]
+    restD = [0]*DMU  # alocando memória para a restrição de desigualdade (vetor)
+    restrI = 0     # restrição de igualdade (somente uma, por isso não é vetor)
+
+    pl = pywraplp.Solver('CCR - Multiplicadores - Input', pywraplp.Solver.GLOP_LINEAR_PROGRAMMING)
+
+    # declarar as variáveis de decisão: pesos do input
+    for i in range(IN): # percorre as linhas: para cada input
+        v[i] = pl.NumVar(0, pl.infinity(), 'v'+str(i))  # min, max, nome
+
+    # declarar as variáveis de decisão: pesos do output
+    for j in range(OUT): # percorre as linhas: para cada output
+        u[j] = pl.NumVar(0, pl.infinity(), 'u'+str(j))  # min, max, nome
+
+    # declarar as restrições
+    restrI = pl.Constraint(1, 1)  # min, max
+    for k in range(DMU):
+        restD[k] = pl.Constraint(-pl.infinity(), 0) # <=0   min, max
+
+    # definir os coeficientes das variáveis nas restrições
+    for i in range(IN):  
+        restrI.SetCoefficient(v[i], float(x[i][dmuO]))
+
+    for k in range(DMU):   # para toda restrição de desigualdade
+        for i in range(IN): 
+            restD[k].SetCoefficient(v[i], float(-x[i][k]))
+        for j in range(OUT): 
+            restD[k].SetCoefficient(u[j], float(y[j][k]))
+
+    # declaração da função-objetivo  
+    objetivo = pl.Objective()
+    for j in range(OUT): 
+        objetivo.SetCoefficient(u[j], float(y[j][dmuO]))
+
+    objetivo.SetMaximization()  
+
+    # Resolve
+    status = pl.Solve()
+    eff = 100*pl.Objective().Value()
+    print("\nDMU", Nomes[dmuO], "   Eficiência = %.2f" % eff)
+    if eff < 100:
+        diminui = pl.Objective().Value()
+        print("Para se tornar eficiente, DMU", dmuO, "deve diminuir os inputs multiplicando-os por %.2f" %diminui)
+
+    # variáveis duais
+    print(("Restrição Igualdade, variável dual = %f" %(restrI.dual_value())))
+    for i, constraint in enumerate(restD):
+        print(("Restrição Desigualdade k = %d, DMU %s, variável dual = %f" %(i, i, constraint.dual_value())))
+
+    return 
+
+# PROGRAMA PRINCIPAL
+
+# Lê planilha e executa todos os problemas
+DMU, Nomes, IN, OUT, x, y = leitura("DEAGE.xlsx")
+
+print("================================")
+print("Modelo CCR MULTIPLICADORES INPUT")
+print("================================")
+for o in range(DMU):  # para cada DMU o, roda o modelo CCR
+    CCR_MULTIPLICADORES_INPUT(Nomes, o, DMU, IN, OUT, x, y)
